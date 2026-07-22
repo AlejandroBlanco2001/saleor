@@ -37,3 +37,5 @@ dist/
 
 # Exported results file
 django-queries-results.html
+
+/context/
