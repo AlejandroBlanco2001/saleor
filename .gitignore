@@ -1,7 +1,7 @@
 *.py[cod]
 .*
 .*
-!.agents/
+!.claude
 !.agents/**
 !.babelrc
 !.circleci
