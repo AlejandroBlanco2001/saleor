@@ -1,4 +1,4 @@
-# Step 2 — order-service HTTP layer
+# Step 2 — order-service HTTP layer [DONE]
 
 Depends on: Step 1 (`plans/steps/01-order-service-domain-db.md`) done and verified.
 See `plans/00-master-plan.md` for full context.

@@ -1,13 +1,17 @@
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
+from fastapi import Depends
+
+from app.db.session import SessionDep
 from app.domain.order_status import OrderStatus
 from app.models.order import OrderEntity
 from app.repositories.order_repository import OrderRepository
 
 _SERVER_DEFAULTS: dict[str, Any] = {
     "status": OrderStatus.UNFULFILLED,
+    "language_code": "en",
     "tracking_client_id": "",
     "user_email": "",
     "shipping_price_net_amount": 0,
@@ -39,3 +43,13 @@ class OrderService:
 
     async def get_order(self, order_id: int) -> OrderEntity | None:
         return await self._repository.get_by_id(order_id)
+
+    async def get_order_by_token(self, token: str) -> OrderEntity | None:
+        return await self._repository.get_by_token(token)
+
+
+def get_order_service(session: SessionDep) -> OrderService:
+    return OrderService(OrderRepository(session))
+
+
+OrderServiceDep = Annotated[OrderService, Depends(get_order_service)]
