@@ -1,4 +1,4 @@
-# Step 1 — order-service domain + DB layer
+# Step 1 — order-service domain + DB layer [DONE]
 
 Depends on: nothing. First step, self-contained.
 See `plans/00-master-plan.md` for full context.
