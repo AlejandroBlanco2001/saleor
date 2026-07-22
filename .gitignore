@@ -1,5 +1,8 @@
 *.py[cod]
 .*
+.*
+!.agents/
+!.agents/**
 !.babelrc
 !.circleci
 !.codeclimate.yml
