@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from app.schemas.order import OrderCreateRequest, OrderResponse
+from app.domain.order_status import InvalidTransitionError
+from app.schemas.order import OrderCreateRequest, OrderResponse, OrderStatusUpdateRequest
 from app.services.order_service import OrderServiceDep
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -15,6 +16,24 @@ async def create_order(
     order = await order_service.create_order(
         payload.model_dump(exclude_none=True), background_tasks
     )
+    return OrderResponse.model_validate(order)
+
+
+@router.patch("/{order_id}/status")
+async def update_order_status(
+    order_id: int,
+    payload: OrderStatusUpdateRequest,
+    order_service: OrderServiceDep,
+    background_tasks: BackgroundTasks,
+) -> OrderResponse:
+    try:
+        order = await order_service.update_status(
+            order_id, payload.status, background_tasks
+        )
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
     return OrderResponse.model_validate(order)
 
 

@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, Depends
 
 from app.db.session import SessionDep
-from app.domain.order_status import OrderStatus
+from app.domain.order_status import OrderStatus, transition_order_status
 from app.models.order import OrderEntity
 from app.repositories.order_repository import OrderRepository
 from app.services.event_publisher import publish_order_event
@@ -49,6 +49,20 @@ class OrderService:
         # (Django's order_service_client, with its own short read timeout) is
         # waiting on.
         background_tasks.add_task(publish_order_event, "order_created", order.id)
+        return order
+
+    async def update_status(
+        self,
+        order_id: int,
+        new_status: OrderStatus,
+        background_tasks: BackgroundTasks,
+    ) -> OrderEntity | None:
+        order = await self._repository.get_by_id(order_id)
+        if order is None:
+            return None
+        transition_order_status(order, new_status)  # raises InvalidTransitionError
+        order = await self._repository.save(order)
+        background_tasks.add_task(publish_order_event, "order_status_changed", order.id)
         return order
 
     async def get_order(self, order_id: int) -> OrderEntity | None:

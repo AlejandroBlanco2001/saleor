@@ -1,12 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.domain.order_status import OrderStatus
 
 
 class OrderCreateRequest(BaseModel):
+    """Totals are computed by Django (tax/discount/shipping pricing stays in
+    the monolith -- not yet migrated) and trusted as input here. This is a
+    consistency check on what Django sends, not an independent recompute.
+    """
+
     currency: str
     total_net_amount: Decimal
     total_gross_amount: Decimal
@@ -27,6 +32,28 @@ class OrderCreateRequest(BaseModel):
     language_code: str | None = None
     tracking_client_id: str | None = None
     customer_note: str | None = None
+
+    @model_validator(mode="after")
+    def _check_totals_consistent(self) -> "OrderCreateRequest":
+        if self.total_net_amount < 0 or self.total_gross_amount < 0:
+            raise ValueError("Order totals must not be negative.")
+        if self.total_net_amount > self.total_gross_amount:
+            raise ValueError("total_net_amount must not exceed total_gross_amount.")
+        if self.shipping_price_net_amount is not None:
+            if self.shipping_price_net_amount < 0:
+                raise ValueError("shipping_price_net_amount must not be negative.")
+            if self.shipping_price_gross_amount is None or (
+                self.shipping_price_net_amount > self.shipping_price_gross_amount
+            ):
+                raise ValueError(
+                    "shipping_price_net_amount must not exceed "
+                    "shipping_price_gross_amount."
+                )
+        return self
+
+
+class OrderStatusUpdateRequest(BaseModel):
+    status: OrderStatus
 
 
 class OrderResponse(BaseModel):

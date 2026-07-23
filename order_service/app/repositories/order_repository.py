@@ -27,3 +27,8 @@ class OrderRepository:
     async def get_by_token(self, token: str) -> OrderEntity | None:
         stmt = select(OrderEntity).where(OrderEntity.token == token)
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def save(self, order: OrderEntity) -> OrderEntity:
+        await self._session.commit()
+        await self._session.refresh(order)
+        return order

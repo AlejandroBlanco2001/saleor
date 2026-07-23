@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b6f0b6b0-2f1a-4c1a-9b6a-order-service-migration",
     "name": "Saleor - Order Service Migration",
-    "description": "End-to-end GraphQL + REST checks that run unchanged against BOTH the pre-modernization monolith (Django ORM order resolvers) and the post-modernization monolith (order-service FastAPI facade, steps 5/6 of the Strangler Fig migration in plans/00-master-plan.md).\n\nRun with the `Monolith - Pre-Modernization` environment against a checkout of the old code (before commit `3fdb8f9c81`), and with `Monolith - Post-Modernization` against current `main` with the `local`/`monolith` docker-compose profile up. Folder 04 (order-service direct REST checks) auto-skips when `order_service_enabled` is not `true`, so the same collection works unmodified in both modes.\n\nRun order matters \u2014 folders 01-03 create the checkout/order and store its id/token in collection variables that 04-05 read.",
+    "description": "End-to-end GraphQL + REST checks that run unchanged against BOTH the pre-modernization monolith (Django ORM order resolvers) and the post-modernization monolith (order-service FastAPI facade, steps 5/6 of the Strangler Fig migration in plans/00-master-plan.md).\n\nRun with the `Monolith - Pre-Modernization` environment against a checkout of the old code (before commit `3fdb8f9c81`), and with `Monolith - Post-Modernization` against current `main` with the `local`/`monolith` docker-compose profile up. Folders 05 and 06 (order-service direct REST checks) auto-skip when `order_service_enabled` is not `true`, so the same collection works unmodified in both modes.\n\nRun order matters \u2014 folders 01-03 create the checkout/order and store its id/token in collection variables that 04-06 read. Folder 06 mutates that order's status (ORD-04), so it runs last, after folder 04's queries have already captured the pre-transition state.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -833,6 +833,219 @@
                 "orders",
                 "999999999"
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - order-service direct: ORD-01 validation + ORD-04 transitions (microservice only)",
+      "description": "Proves ORD-01's totals-consistency check and ORD-04's status state machine are real, live behavior over HTTP, not just unit-tested domain logic. Skips automatically on the pre-modernization environment, same as folder 05.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.variables.get('order_service_enabled') !== 'true') {",
+              "  console.log('order_service_enabled != true -- skipping order-service direct checks (expected on the pre-modernization monolith)');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "POST /orders/ - net > gross -> 422 (ORD-01)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('rejects with a totals error', () => pm.expect(JSON.stringify(pm.response.json())).to.include('total_net_amount'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{order_service_url}}/orders/",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currency\": \"USD\", \"total_net_amount\": \"20.00\", \"total_gross_amount\": \"10.00\", \"checkout_token\": \"postman-ord01-bad-totals\"}"
+            }
+          }
+        },
+        {
+          "name": "POST /orders/ - negative total -> 422 (ORD-01)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{order_service_url}}/orders/",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currency\": \"USD\", \"total_net_amount\": \"-1.00\", \"total_gross_amount\": \"10.00\", \"checkout_token\": \"postman-ord01-negative-total\"}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /orders/{id}/status - valid transition -> 200 (ORD-04)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status updated to fulfilled', () => pm.expect(pm.response.json().status).to.eql('fulfilled'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{order_service_url}}/orders/{{order_numeric_id}}/status",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_numeric_id}}",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"status\": \"fulfilled\"}"
+            }
+          },
+          "description": "Transitions the order created in folder 03 (still 'unfulfilled' -- folder 04's queries already ran and captured that state). Runs after folder 04 so it doesn't disturb those earlier assertions."
+        },
+        {
+          "name": "PATCH /orders/{id}/status - invalid transition -> 422 (ORD-04)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('rejects with an invalid-transition message', () => pm.expect(pm.response.json().detail).to.include('Cannot transition'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{order_service_url}}/orders/{{order_numeric_id}}/status",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_numeric_id}}",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"status\": \"unfulfilled\"}"
+            }
+          },
+          "description": "fulfilled -> unfulfilled is not a valid transition (fulfilled is terminal)."
+        },
+        {
+          "name": "PATCH /orders/{id}/status - missing order -> 404 (ORD-04)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{order_service_url}}/orders/999999999/status",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                "999999999",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"status\": \"fulfilled\"}"
             }
           }
         }
