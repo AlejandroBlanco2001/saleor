@@ -41,3 +41,8 @@ dist/
 django-queries-results.html
 
 /context/
+
+# Terraform (infra/terraform/)
+infra/terraform/terraform.tfvars
+infra/terraform/terraform.tfstate*
+infra/terraform/*.tfplan

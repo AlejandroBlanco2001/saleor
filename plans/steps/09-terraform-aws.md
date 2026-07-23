@@ -1,4 +1,4 @@
-# Step 9 — Terraform plan for AWS Academy Learner Lab (RDS + SQS + order-service EC2)
+# Step 9 — Terraform plan for AWS Academy Learner Lab (RDS + SQS + order-service EC2) [DONE]
 
 Depends on: Step 7 (working `docker-compose.yml`, specifically the `order-service` and `monolith` profiles) as the reference topology. Independent of step 8.
 See `plans/00-master-plan.md` for full context, especially "Revised target deployment".
@@ -23,15 +23,28 @@ AWS Academy Learner Lab issues session-scoped credentials with IAM locked to the
 
 ## Files to create
 
+Refactored into modules after the initial single-file version (user request:
+"modern module architecture, and documented") — final layout:
+
 ```
 infra/terraform/
-  main.tf
+  main.tf              # provider, shared data sources, module wiring only
   variables.tf
   outputs.tf
-  user_data_order_service.sh.tpl
-  README.md
+  README.md            # includes the module dependency graph
   terraform.tfvars.example   # committed template; real terraform.tfvars is gitignored
+  modules/
+    security/     # both security groups (main.tf, variables.tf, outputs.tf, README.md)
+    rds/          # RDS Postgres instance
+    sqs/          # Celery broker queue
+    order_service/     # EC2 instance + user_data.sh.tpl (moved in from root)
 ```
+
+Module dependency graph (see root `README.md` for the full explanation of why
+it's split this way, specifically why both security groups live in one
+module): `security` → `rds` → `order_service` (via `rds`'s `endpoint`
+output); `security` → `order_service` directly (its own SG); `sqs` has no
+dependencies on anything else.
 
 ## `main.tf` — resources (single flat config, no modules — small enough)
 
@@ -70,11 +83,19 @@ Shell script: install Docker + Compose plugin, pull/copy the repo (`git clone` i
 - Learner Lab caveat: session credentials expire — if `apply` fails mid-way with an auth error, refresh the Learner Lab session's credentials and re-run (Terraform state lets it resume, doesn't restart from scratch).
 - `terraform destroy` reminder before ending the lab session, to avoid a dangling RDS instance if the session doesn't fully reclaim resources.
 
-## Verification
+## Verification — actually run, results below
 
-- `terraform validate` and `terraform fmt -check` pass with no AWS credentials needed.
-- `terraform plan` runs clean against a real (or sandboxed) Learner Lab session, showing the expected resource list (2 security groups, 1 RDS instance, 1 SQS queue, 1 EC2 instance) with no attempt to create an IAM role/policy anywhere in the plan output.
-- (Explicit, separate, user-triggered) `terraform apply`, then: `docker compose ps` on the order-service instance shows a healthy container; from the developer's machine, `ENV_FILE=.env.cloud docker compose --profile monolith up` (using the generated `.env.cloud` snippet) brings up a working monolith that reaches RDS, SQS, and the order-service EC2 instance; a manual GraphQL query and a full checkout-completion flow both work end-to-end.
+- `terraform fmt -check -diff` → clean, no output.
+- `terraform init -backend=false` → succeeds, `aws` provider ~> 5.0 installed.
+- `terraform validate` → **Success! The configuration is valid.**
+- `terraform plan` with dummy var values (no real Learner Lab session available in this environment) → fails at the expected point: `Retrieving AWS account details: ... InvalidClientTokenId` — confirms the resource graph itself builds cleanly (all references resolve, no cycles) and the only thing blocking a real plan is actual AWS credentials, exactly as expected without a live Learner Lab session. A full `terraform plan`/`apply` against a real session is still the explicit, separate, user-triggered step described above — not run here.
+- Not independently re-verified: whether `LabRole`/`LabInstanceProfile` actually has SQS permissions (flagged in this file's "Constraints" section and in `README.md` as something to check with a real session before trusting the SQS approach) — no live AWS access in this environment to check it.
+
+**Deviations from the plan's literal file list**, both harmless: `main.tf` includes a `terraform { required_providers { aws } }` block and `provider "aws" {}` (needed for `init`/`validate` to work at all, the plan's resource list implied but didn't spell out); AMI lookup pins Ubuntu 22.04 explicitly (Canonical owner ID `099720109477`) rather than leaving the choice open, since the `user_data` script's Docker install steps are Ubuntu-specific (`apt`, Docker's official Ubuntu repo).
+
+**Refactored into modules on request** (after the above was already working as one flat config): `security`/`rds`/`sqs`/`order_service`, each with its own `README.md` (inputs/outputs tables, dependency notes). Re-ran the full verification after the refactor — `fmt`/`init`/`validate` all clean, `terraform graph` confirms the dependency edges match the documented graph (`security.rds_sg` depends on `security.order_service_sg` in-module; `rds` depends on `security`'s output; `order_service` depends on `rds`'s `endpoint` output), `plan` with dummy vars still resolves the whole graph and fails only at the AWS auth boundary, same as before the refactor.
+
+**Added on request, also after the above**: `scripts/cloud_dev.py` (+ `.sh`/`.bat` wrappers) drives this Terraform config and step 7's `monolith` Compose profile together — `plan`/`apply`/`wire`/`start`/`status`/`stop`/`destroy`/`all` subcommands, every billed/destructive one gated behind an explicit `--yes` so it's safe for an agent to run unattended otherwise. `wire` builds `.env.cloud` straight from `terraform output -json` plus the current shell's AWS creds (needs `AWS_SESSION_TOKEN` too — Learner Lab issues temporary STS creds, not just a key/secret pair — added to `.env.cloud.example` as well). Smoke-tested all the fast-fail paths for real: missing `terraform.tfvars` → clean error + exit 1; missing AWS env vars → clean error + exit 1; `apply` without `--yes` → falls back to `plan` instead of applying. Full `apply`/`wire`/`start` path not run end-to-end (needs a real Learner Lab session, same limitation as the rest of this step).
 
 ## This is the last step
 

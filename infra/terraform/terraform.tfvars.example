@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values.
+# Never commit the real terraform.tfvars.
+
+my_ip                       = "203.0.113.7/32" # your public IP, /32 only
+db_username                 = "saleor"
+db_password                 = "CHANGE-ME"
+order_service_shared_secret = "CHANGE-ME"
+
+# Wherever your LOCAL monolith (step 7's `monolith` Compose profile) is
+# reachable from -- a tunnel URL most likely. See variables.tf's
+# description and plans/steps/07-docker-compose.md's "known gap" note.
+django_events_url = "http://CHANGE-ME-tunnel.example:8000/order-service/events/"
