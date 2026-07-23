@@ -8,6 +8,8 @@
 !.codeclimate.yml
 !.coveragerc
 !.dockerignore
+!.env.local.example
+!.env.cloud.example
 !.eslintrc.json
 !.flowconfig
 !.github

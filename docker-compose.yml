@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:12
+    profiles: ["local"]
+    environment:
+      POSTGRES_USER: saleor
+      POSTGRES_PASSWORD: saleor
+      POSTGRES_DB: saleor
+    volumes:
+      - saleor-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saleor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:6-alpine
+    profiles: ["local"]
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["local", "monolith"]
+    env_file: ${ENV_FILE:-.env.local}
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn --bind :8000 --workers 4 --worker-class uvicorn.workers.UvicornWorker saleor.asgi:application"
+
+  celeryworker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["local", "monolith"]
+    env_file: ${ENV_FILE:-.env.local}
+    command: ["celery", "-A", "saleor.celeryconf:app", "worker", "--loglevel=info", "-E"]
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order_service/Dockerfile
+    profiles: ["local", "order-service"]
+    env_file: ${ENV_FILE:-.env.local}
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  saleor-db:

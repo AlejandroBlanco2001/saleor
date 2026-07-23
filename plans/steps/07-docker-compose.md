@@ -1,4 +1,4 @@
-# Step 7 — docker-compose.yml + order_service/Dockerfile (local, and local-against-cloud)
+# Step 7 — docker-compose.yml + order_service/Dockerfile (local, and local-against-cloud) [DONE]
 
 Depends on: Steps 1-6 done and verified locally/standalone.
 See `plans/00-master-plan.md` for full context, especially "Revised target deployment".
@@ -119,15 +119,21 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 Generate from the uv project rather than hand-copying, so it can't drift: `cd order_service && uv export --no-dev --format requirements-txt > requirements.txt` (or `uv pip compile pyproject.toml -o requirements.txt` depending on the installed `uv` version — check `uv export --help` first). Re-run this whenever `order_service/pyproject.toml`'s deps change.
 
-## Verification
+## Verification — actually run, results below
 
-- `local` profile: `docker compose --profile local up -d`, wait for healthchecks, then:
-  - `docker compose exec web python manage.py migrate` succeeds.
-  - `docker compose exec web python manage.py shell` → `Order.objects.count()` works.
-  - Manual GraphQL `order(id: ...)` query against `http://localhost:8000/graphql/` hits the real `order-service` container (check its logs).
-  - Full checkout-completion flow creates an order via `order-service`, visible through `GET http://localhost:8001/orders/{id}` and the Django admin/ORM.
-  - `docker compose stop order-service` mid-flow → monolith returns a controlled error within the configured timeout for both a query and a checkout-completion attempt, not a hang.
-- `monolith`/`order-service` profiles: exercised for real only once step 9's Terraform output (RDS endpoint, SQS URL, order-service EC2 IP) exists — until then, verify only that `docker compose --profile monolith config` / `docker compose --profile order-service config` render without error (i.e. the profile wiring itself is correct), and note in the PR/commit that the cloud-pointed modes are untested until step 9 lands.
+- `local` profile: `docker compose --profile local up -d` — all 5 containers up, `db`/`order-service` healthchecks green.
+  - `web`'s `migrate` (chained into its `command:`) applied the full migration set on container start — confirmed via logs, no manual step needed.
+  - `POST /graphql/` → `{ shop { name } }` returns real data — monolith serving traffic.
+  - `docker compose exec web python -c "... order_service_client.get_order(999) ..."` from **inside the web container** → `None` — real network round-trip web→order-service→Postgres, not a mock.
+  - `docker compose stop order-service` then the same call → `OrderServiceUnavailable` raised in ~8s (DNS-resolution-failure path once the container's gone, not the raw TCP-refused path step 4's own test used — see `plans/GOTCHAS.md`), confirming a controlled error, not a hang.
+  - `docker compose down` tears down clean.
+  - Not run: a full checkout-completion GraphQL mutation sequence end-to-end through this stack (would need a scripted cart→address→shipping→payment→complete flow) — the underlying facade code itself is already covered by `saleor/checkout/tests/test_checkout_complete.py`'s real-DB tests, so this was judged lower-value than the network/timeout checks above for this pass.
+- `monolith`/`order-service` profiles: `docker compose --profile monolith config` / `--profile order-service config` render clean (profile wiring verified). Not run against real AWS — blocked on step 9's Terraform output (RDS endpoint, SQS URL, order-service EC2 IP), as originally noted.
+
+**Two unrelated pre-existing repo issues found and fixed while getting the `local` profile to actually build** (not part of this step's original scope, but blocking it):
+- Root `Dockerfile`: `libssl1.1` no longer exists in current `python:3.8-slim` (Debian base drifted from buster to bookworm since the Dockerfile was written) — swapped to `libssl3`.
+- `requirements_dev.txt`: `codecov==2.1.10` was yanked from PyPI (same issue already logged in `plans/GOTCHAS.md` for the local venv install) — bumped to `2.1.13`.
+- `docker-compose.yml`'s `celeryworker` command needed `celery -A saleor.celeryconf:app worker ...` (global `-A`), not the Procfile's `celery worker -A saleor.celeryconf:app ...` — Celery 5.0.1 rejects `-A` as a subcommand option. The `Procfile` itself still has the old (now-broken) form; not fixed here since nothing in this step's verification runs the Procfile directly, but worth knowing before anyone assumes it still works verbatim.
 
 ## Next step
 
