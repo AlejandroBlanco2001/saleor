@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.schemas.order import OrderCreateRequest, OrderResponse
 from app.services.order_service import OrderServiceDep
@@ -8,9 +8,13 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 @router.post("/", status_code=201)
 async def create_order(
-    payload: OrderCreateRequest, order_service: OrderServiceDep
+    payload: OrderCreateRequest,
+    order_service: OrderServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> OrderResponse:
-    order = await order_service.create_order(payload.model_dump(exclude_none=True))
+    order = await order_service.create_order(
+        payload.model_dump(exclude_none=True), background_tasks
+    )
     return OrderResponse.model_validate(order)
 
 

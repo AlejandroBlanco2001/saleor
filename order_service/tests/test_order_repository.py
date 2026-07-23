@@ -1,5 +1,6 @@
 """Integration tests against the real dev Postgres (same DSN Django uses)."""
 
+from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.order_repository import OrderRepository
@@ -11,7 +12,8 @@ async def test_create_and_fetch_order_round_trips(session: AsyncSession) -> None
     service = OrderService(repository)
 
     order = await service.create_order(
-        {"language_code": "en", "currency": "USD", "checkout_token": "test-checkout"}
+        {"language_code": "en", "currency": "USD", "checkout_token": "test-checkout"},
+        BackgroundTasks(),
     )
 
     try:

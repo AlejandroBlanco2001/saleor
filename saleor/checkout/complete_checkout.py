@@ -233,9 +233,9 @@ def _order_data_to_payload(order_data: dict, checkout_token: str) -> dict:
     the plain-scalar payload order-service's `POST /orders/` expects.
     """
     payload = {
-        "checkout_token": checkout_token,
+        "checkout_token": str(checkout_token),
         "language_code": order_data.get("language_code", ""),
-        "tracking_client_id": order_data.get("tracking_client_id", ""),
+        "tracking_client_id": str(order_data.get("tracking_client_id", "")),
         "user_email": order_data.get("user_email", ""),
         "customer_note": order_data.get("customer_note", ""),
         "discount_name": order_data.get("discount_name"),

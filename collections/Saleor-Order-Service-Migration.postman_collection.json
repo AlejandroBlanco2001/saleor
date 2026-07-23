@@ -1,0 +1,842 @@
+{
+  "info": {
+    "_postman_id": "b6f0b6b0-2f1a-4c1a-9b6a-order-service-migration",
+    "name": "Saleor - Order Service Migration",
+    "description": "End-to-end GraphQL + REST checks that run unchanged against BOTH the pre-modernization monolith (Django ORM order resolvers) and the post-modernization monolith (order-service FastAPI facade, steps 5/6 of the Strangler Fig migration in plans/00-master-plan.md).\n\nRun with the `Monolith - Pre-Modernization` environment against a checkout of the old code (before commit `3fdb8f9c81`), and with `Monolith - Post-Modernization` against current `main` with the `local`/`monolith` docker-compose profile up. Folder 04 (order-service direct REST checks) auto-skips when `order_service_enabled` is not `true`, so the same collection works unmodified in both modes.\n\nRun order matters \u2014 folders 01-03 create the checkout/order and store its id/token in collection variables that 04-05 read.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "order_service_url",
+      "value": "http://localhost:8001"
+    },
+    {
+      "key": "order_service_enabled",
+      "value": "false"
+    },
+    {
+      "key": "admin_email",
+      "value": "admin@example.com"
+    },
+    {
+      "key": "admin_password",
+      "value": "admin"
+    },
+    {
+      "key": "jwt_token",
+      "value": ""
+    },
+    {
+      "key": "variant_id",
+      "value": ""
+    },
+    {
+      "key": "checkout_token",
+      "value": ""
+    },
+    {
+      "key": "checkout_id",
+      "value": ""
+    },
+    {
+      "key": "order_gid",
+      "value": ""
+    },
+    {
+      "key": "order_numeric_id",
+      "value": ""
+    },
+    {
+      "key": "order_token",
+      "value": ""
+    },
+    {
+      "key": "order_status_from_graphql",
+      "value": ""
+    }
+  ],
+  "auth": null,
+  "item": [
+    {
+      "name": "00 - Health",
+      "item": [
+        {
+          "name": "Shop is reachable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('shop name present', () => pm.expect(body.data.shop.name).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query { shop { name defaultCountry { code } } }\"}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 - Auth",
+      "item": [
+        {
+          "name": "tokenCreate (staff login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const result = body.data.tokenCreate;",
+                  "pm.test('no account errors', () => pm.expect(result.accountErrors).to.have.lengthOf(0));",
+                  "pm.test('token issued', () => pm.expect(result.token).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('jwt_token', result.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation TokenCreate($email: String!, $password: String!) { tokenCreate(email: $email, password: $password) { token accountErrors { field message } } }\",\"variables\":{\"email\":\"{{admin_email}}\",\"password\":\"{{admin_password}}\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Catalog (source test data)",
+      "item": [
+        {
+          "name": "products(first: 1) -> pick a variant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const edges = body.data.products.edges;",
+                  "pm.test('at least one product with a variant', () => {",
+                  "  pm.expect(edges.length).to.be.above(0);",
+                  "  pm.expect(edges[0].node.variants.length).to.be.above(0);",
+                  "});",
+                  "pm.collectionVariables.set('variant_id', edges[0].node.variants[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "JWT {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query { products(first: 1) { edges { node { id name variants { id name } } } } }\"}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Checkout to Order (creation facade, step 6)",
+      "item": [
+        {
+          "name": "checkoutCreate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const result = body.data.checkoutCreate;",
+                  "pm.test('no checkout errors', () => pm.expect(result.checkoutErrors).to.have.lengthOf(0));",
+                  "pm.test('checkout token issued', () => pm.expect(result.checkout.token).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('checkout_token', result.checkout.token);",
+                  "pm.collectionVariables.set('checkout_id', result.checkout.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation CheckoutCreate($lines: [CheckoutLineInput]!, $email: String!) { checkoutCreate(input: {lines: $lines, email: $email}) { checkout { id token } checkoutErrors { field message } } }\",\"variables\":{\"lines\":[{\"variantId\":\"{{variant_id}}\",\"quantity\":1}],\"email\":\"postman-migration-test@example.com\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "checkoutShippingAddressUpdate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('no checkout errors', () => pm.expect(body.data.checkoutShippingAddressUpdate.checkoutErrors).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation ($checkoutId: ID!, $address: AddressInput!) { checkoutShippingAddressUpdate(checkoutId: $checkoutId, shippingAddress: $address) { checkoutErrors { field message } } }\",\"variables\":{\"checkoutId\":\"{{checkout_id}}\",\"address\":{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"streetAddress1\":\"1 Analytical Engine Way\",\"city\":\"London\",\"postalCode\":\"E1 6AN\",\"country\":\"GB\",\"countryArea\":\"\"}}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "checkoutBillingAddressUpdate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('no checkout errors', () => pm.expect(body.data.checkoutBillingAddressUpdate.checkoutErrors).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation ($checkoutId: ID!, $address: AddressInput!) { checkoutBillingAddressUpdate(checkoutId: $checkoutId, billingAddress: $address) { checkoutErrors { field message } } }\",\"variables\":{\"checkoutId\":\"{{checkout_id}}\",\"address\":{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"streetAddress1\":\"1 Analytical Engine Way\",\"city\":\"London\",\"postalCode\":\"E1 6AN\",\"country\":\"GB\",\"countryArea\":\"\"}}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "checkout { availableShippingMethods } -> pick one",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const methods = body.data.checkout.availableShippingMethods;",
+                  "pm.test('at least one shipping method available', () => pm.expect(methods.length).to.be.above(0));",
+                  "pm.collectionVariables.set('shipping_method_id', methods[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query ($token: UUID) { checkout(token: $token) { availableShippingMethods { id name } } }\",\"variables\":{\"token\":\"{{checkout_token}}\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "checkoutShippingMethodUpdate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('no checkout errors', () => pm.expect(body.data.checkoutShippingMethodUpdate.checkoutErrors).to.have.lengthOf(0));",
+                  "pm.collectionVariables.set('checkout_total_gross', body.data.checkoutShippingMethodUpdate.checkout.totalPrice.gross.amount);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation ($checkoutId: ID, $method: ID!) { checkoutShippingMethodUpdate(checkoutId: $checkoutId, shippingMethodId: $method) { checkout { totalPrice { gross { amount } } } checkoutErrors { field message } } }\",\"variables\":{\"checkoutId\":\"{{checkout_id}}\",\"method\":\"{{shipping_method_id}}\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "checkoutPaymentCreate (dummy gateway)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('no payment errors', () => pm.expect(body.data.checkoutPaymentCreate.paymentErrors).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation ($checkoutId: ID!, $input: PaymentInput!) { checkoutPaymentCreate(checkoutId: $checkoutId, input: $input) { paymentErrors { field message } } }\",\"variables\":{\"checkoutId\":\"{{checkout_id}}\",\"input\":{\"gateway\":\"mirumee.payments.dummy\",\"token\":\"fully-authorized\",\"amount\":{{checkout_total_gross}}}}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "checkoutComplete -> creates the order via the facade",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const result = body.data.checkoutComplete;",
+                  "pm.test('no checkout errors', () => pm.expect(result.checkoutErrors).to.have.lengthOf(0));",
+                  "pm.test('order returned', () => pm.expect(result.order).to.not.be.null);",
+                  "pm.collectionVariables.set('order_gid', result.order.id);",
+                  "pm.collectionVariables.set('order_token', result.order.token);",
+                  "const numericId = Buffer.from(result.order.id, 'base64').toString('utf-8').split(':')[1];",
+                  "pm.collectionVariables.set('order_numeric_id', numericId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"mutation ($checkoutId: ID!) { checkoutComplete(checkoutId: $checkoutId) { order { id token } checkoutErrors { field message } } }\",\"variables\":{\"checkoutId\":\"{{checkout_id}}\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Order Queries (query facade, step 5)",
+      "item": [
+        {
+          "name": "order(id) - found, full field parity",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const order = body.data.order;",
+                  "pm.test('order found', () => pm.expect(order).to.not.be.null);",
+                  "['id','token','status','created','lines','shippingAddress','billingAddress','total','shippingPrice','weight'].forEach((field) => {",
+                  "  pm.test(`field present: ${field}`, () => pm.expect(order).to.have.property(field));",
+                  "});",
+                  "pm.test('id matches the created order', () => pm.expect(order.id).to.eql(pm.collectionVariables.get('order_gid')));",
+                  "pm.test('at least one line, quantity matches checkout', () => {",
+                  "  pm.expect(order.lines.length).to.be.above(0);",
+                  "  pm.expect(order.lines[0].quantity).to.eql(1);",
+                  "});",
+                  "pm.collectionVariables.set('order_status_from_graphql', order.status);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "JWT {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query ($id: ID!) { order(id: $id) { id token status created customerNote languageCode trackingClientId discountName translatedDiscountName displayGrossPrices shippingMethodName shippingPrice { gross { amount currency } net { amount currency } } discount { amount currency } total { gross { amount currency } net { amount currency } } billingAddress { city countryArea } shippingAddress { city countryArea } lines { productName quantity } weight { value unit } } }\",\"variables\":{\"id\":\"{{order_gid}}\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "order(id) - missing -> null, not an error",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('null for a nonexistent order', () => pm.expect(body.data.order).to.be.null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "JWT {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query ($id: ID!) { order(id: $id) { id } }\",\"variables\":{\"id\":\"T3JkZXI6OTk5OTk5OTk5\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          },
+          "description": "\"T3JkZXI6OTk5OTk5OTk5\" is base64 for \"Order:999999999\" -- an id that shouldn't exist in a fresh dev DB."
+        },
+        {
+          "name": "orderByToken - found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const order = body.data.orderByToken;",
+                  "pm.test('order found', () => pm.expect(order).to.not.be.null);",
+                  "pm.test('token matches', () => pm.expect(order.token).to.eql(pm.collectionVariables.get('order_token')));",
+                  "pm.test('status matches order(id) query from the previous request', () => pm.expect(order.status).to.eql(pm.collectionVariables.get('order_status_from_graphql')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "JWT {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query ($token: UUID!) { orderByToken(token: $token) { token status } }\",\"variables\":{\"token\":\"{{order_token}}\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "orderByToken - missing token -> null",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('no graphql errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('null for an unknown token', () => pm.expect(body.data.orderByToken).to.be.null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "JWT {{jwt_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"query\":\"query ($token: UUID!) { orderByToken(token: $token) { token } }\",\"variables\":{\"token\":\"11111111-1111-1111-1111-111111111111\"}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - order-service direct (microservice only, post-modernization)",
+      "description": "Talks to order-service's FastAPI REST API directly (bypassing GraphQL) to prove the facade in folder 04 is actually backed by this service, not a leftover ORM path. Every request here is skipped automatically when `order_service_enabled` != \"true\" (set that in the pre-modernization environment, or run this whole folder with the post-modernization one), so the same collection is safe to run against either checkout without editing requests.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.variables.get('order_service_enabled') !== 'true') {",
+              "  console.log('order_service_enabled != true -- skipping order-service direct checks (expected on the pre-modernization monolith)');",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('reports ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{order_service_url}}/health",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /orders/{id} - matches the GraphQL facade's view",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const order = pm.response.json();",
+                  "pm.test('same status the GraphQL facade returned (case-insensitive -- GraphQL serializes the enum uppercase, REST returns the raw stored value)', () => pm.expect(order.status.toUpperCase()).to.eql(pm.collectionVariables.get('order_status_from_graphql').toUpperCase()));",
+                  "pm.test('token matches', () => pm.expect(order.token).to.eql(pm.collectionVariables.get('order_token')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{order_service_url}}/orders/{{order_numeric_id}}",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_numeric_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /orders/by-token/{token}",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('same order as by-id lookup', () => pm.expect(pm.response.json().token).to.eql(pm.collectionVariables.get('order_token')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{order_service_url}}/orders/by-token/{{order_token}}",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                "by-token",
+                "{{order_token}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /orders/{id} - missing -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{order_service_url}}/orders/999999999",
+              "host": [
+                "{{order_service_url}}"
+              ],
+              "path": [
+                "orders",
+                "999999999"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import Depends
+from fastapi import BackgroundTasks, Depends
 
 from app.db.session import SessionDep
 from app.domain.order_status import OrderStatus
@@ -33,7 +33,9 @@ class OrderService:
     def __init__(self, repository: OrderRepository) -> None:
         self._repository = repository
 
-    async def create_order(self, payload: dict[str, Any]) -> OrderEntity:
+    async def create_order(
+        self, payload: dict[str, Any], background_tasks: BackgroundTasks
+    ) -> OrderEntity:
         data = {
             **_SERVER_DEFAULTS,
             **payload,
@@ -41,7 +43,12 @@ class OrderService:
             "token": str(uuid4()),
         }
         order = await self._repository.create(data)
-        await publish_order_event("order_created", order.id)
+        # Fire-and-forget per event_publisher's own contract -- scheduled to run
+        # after the response is sent, not awaited inline, so a slow/unreachable
+        # DJANGO_EVENTS_URL can't stall the POST /orders/ response the caller
+        # (Django's order_service_client, with its own short read timeout) is
+        # waiting on.
+        background_tasks.add_task(publish_order_event, "order_created", order.id)
         return order
 
     async def get_order(self, order_id: int) -> OrderEntity | None:
