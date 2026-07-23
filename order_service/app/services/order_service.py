@@ -8,6 +8,7 @@ from app.db.session import SessionDep
 from app.domain.order_status import OrderStatus
 from app.models.order import OrderEntity
 from app.repositories.order_repository import OrderRepository
+from app.services.event_publisher import publish_order_event
 
 _SERVER_DEFAULTS: dict[str, Any] = {
     "status": OrderStatus.UNFULFILLED,
@@ -39,7 +40,9 @@ class OrderService:
             "created": datetime.now(UTC),
             "token": str(uuid4()),
         }
-        return await self._repository.create(data)
+        order = await self._repository.create(data)
+        await publish_order_event("order_created", order.id)
+        return order
 
     async def get_order(self, order_id: int) -> OrderEntity | None:
         return await self._repository.get_by_id(order_id)

@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     async_database_url: str = (
         "postgresql+asyncpg://saleor:saleor@localhost:5432/saleor"
     )
+    django_events_url: str = "http://localhost:8000/order-service/events/"
+    order_service_shared_secret: str = "dev-secret-change-me"
 
 
 settings = Settings()

@@ -7,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .data_feeds.urls import urlpatterns as feed_urls
 from .graphql.api import schema
 from .graphql.views import GraphQLView
+from .order.views import handle_order_service_event
 from .plugins.views import handle_plugin_webhook
 from .product.views import digital_product
 
@@ -22,6 +23,11 @@ urlpatterns = [
         r"plugins/(?P<plugin_id>[.0-9A-Za-z_\-]+)/",
         handle_plugin_webhook,
         name="plugins",
+    ),
+    url(
+        r"^order-service/events/$",
+        handle_order_service_event,
+        name="order-service-events",
     ),
 ]
 

@@ -1,4 +1,4 @@
-# Step 3 — Publish-Subscribe wiring (order-service → Django webhook)
+# Step 3 — Publish-Subscribe wiring (order-service → Django webhook) [DONE]
 
 Depends on: Step 2 (`plans/steps/02-order-service-http-layer.md`) done and verified.
 See `plans/00-master-plan.md` for full context.

@@ -206,6 +206,13 @@ if not SECRET_KEY and DEBUG:
     warnings.warn("SECRET_KEY not configured, using a random temporary key.")
     SECRET_KEY = get_random_secret_key()
 
+# Shared secret order-service sends via the X-Internal-Token header when
+# calling back into POST /order-service/events/. Must be overridden via env
+# in compose/AWS; the default here is only for local dev convenience.
+ORDER_SERVICE_SHARED_SECRET = os.environ.get(
+    "ORDER_SERVICE_SHARED_SECRET", "dev-secret-change-me"
+)
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
