@@ -213,6 +213,15 @@ ORDER_SERVICE_SHARED_SECRET = os.environ.get(
     "ORDER_SERVICE_SHARED_SECRET", "dev-secret-change-me"
 )
 
+# Django -> order-service HTTP client config: short timeout + one bounded
+# retry, so a hung/down order-service surfaces as a controlled error quickly
+# instead of hanging the request. See saleor/order/order_service_client.py.
+ORDER_SERVICE_URL = os.environ.get("ORDER_SERVICE_URL", "http://localhost:8001")
+ORDER_SERVICE_TIMEOUT_CONNECT = float(
+    os.environ.get("ORDER_SERVICE_TIMEOUT_CONNECT", "0.5")
+)
+ORDER_SERVICE_TIMEOUT_READ = float(os.environ.get("ORDER_SERVICE_TIMEOUT_READ", "2.0"))
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",

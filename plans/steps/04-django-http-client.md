@@ -1,4 +1,4 @@
-# Step 4 — Django → order-service HTTP client
+# Step 4 — Django → order-service HTTP client [DONE]
 
 Depends on: Step 2 (`plans/steps/02-order-service-http-layer.md`) done. Independent of step 3.
 See `plans/00-master-plan.md` for full context.
