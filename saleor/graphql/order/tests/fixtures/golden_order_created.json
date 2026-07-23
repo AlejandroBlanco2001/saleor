@@ -1,0 +1,55 @@
+{
+  "billingAddress": {
+    "city": "WROC\u0141AW",
+    "countryArea": ""
+  },
+  "created": "<CREATED>",
+  "customerNote": "",
+  "discount": {
+    "amount": 0.0,
+    "currency": "USD"
+  },
+  "discountName": null,
+  "displayGrossPrices": true,
+  "id": "<ID>",
+  "languageCode": "en",
+  "lines": [
+    {
+      "productName": "Test product",
+      "quantity": 3
+    }
+  ],
+  "shippingAddress": {
+    "city": "WROC\u0141AW",
+    "countryArea": ""
+  },
+  "shippingMethodName": "DHL",
+  "shippingPrice": {
+    "gross": {
+      "amount": 10.0,
+      "currency": "USD"
+    },
+    "net": {
+      "amount": 10.0,
+      "currency": "USD"
+    }
+  },
+  "status": "UNFULFILLED",
+  "token": "<TOKEN>",
+  "total": {
+    "gross": {
+      "amount": 40.0,
+      "currency": "USD"
+    },
+    "net": {
+      "amount": 40.0,
+      "currency": "USD"
+    }
+  },
+  "trackingClientId": "tracking_code",
+  "translatedDiscountName": null,
+  "weight": {
+    "unit": "KG",
+    "value": 0.0
+  }
+}

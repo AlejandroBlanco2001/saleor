@@ -3,6 +3,7 @@ from decimal import Decimal
 import graphene
 from django.utils.dateparse import parse_datetime
 from graphql import GraphQLError
+from measurement.measures import Weight
 
 from ...order import OrderStatus, models
 from ...order import order_service_client
@@ -74,7 +75,10 @@ def _hydrate_order(data: dict) -> models.Order:
         translated_discount_name=data["translated_discount_name"],
         display_gross_prices=data["display_gross_prices"],
         customer_note=data["customer_note"],
-        weight=data["weight"],
+        # MeasurementField doesn't coerce a raw float assigned via the model
+        # constructor the way it does on a DB-fetched row -- wrap explicitly
+        # or `weight { value }` resolves null despite being non-nullable.
+        weight=Weight(kg=data["weight"]),
         language_code=data["language_code"],
         tracking_client_id=data["tracking_client_id"],
     )

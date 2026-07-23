@@ -1,4 +1,4 @@
-# Step 8 — Golden-fixture parity tests
+# Step 8 — Golden-fixture parity tests [DONE]
 
 Depends on: Step 7 done (needs the full composed stack to be stable).
 See `plans/00-master-plan.md` for full context.
@@ -40,9 +40,15 @@ For each golden fixture: run the same GraphQL query against the **facade-enabled
 - Assert: checkout-completion mutation → controlled `CheckoutError`, same timing bound.
 - Assert: **no unhandled exception, no 500, no test timeout/hang** in either case.
 
-## Verification
+## Verification — actually run, results below
 
-`pytest saleor/graphql/order/tests/test_golden_fixture_parity.py saleor/graphql/order/tests/test_order_service_facade.py -v` — all green. This is the last gate before the delivery is considered functionally complete (Terraform in step 9 is infrastructure-only and doesn't gate this).
+Golden fixtures captured via a real throwaway `git worktree add <tmp-dir> c7be1bc8e8` (the last commit before step 5's query facade — confirmed via `git show --stat` on the step 5/6 commits), a one-shot capture test writing normalized JSON directly to `saleor/graphql/order/tests/fixtures/`, then `git worktree remove --force`. `id`/`token`/`created` normalized to placeholders (inherently per-run); everything else compared exactly.
+
+`pytest saleor/graphql/order/tests/test_golden_fixture_parity.py saleor/graphql/order/tests/test_order_service_facade.py -v` → **10/10 passed**. Full regression sweep (`test_order.py` + both `test_checkout_complete.py` files + `test_order_service_events.py`) → **217/217 passed**.
+
+**Real bug caught by this gate, not by any earlier step's tests**: `resolve_order`/`resolve_order_by_token`'s `_hydrate_order()` (step 5) assigned `weight=data["weight"]` — a raw `float` from order-service's JSON response — directly to the Django `Order` model's `weight` `MeasurementField` kwarg. Unlike a DB-fetched row (where the field descriptor coerces the raw column value into a `Weight` object transparently), a value passed straight to the model constructor is **not** coerced — it stayed a bare float, and `weight { value }` in GraphQL resolved to `null` on a non-nullable field, a hard `GraphQLError`. None of steps 5/6/7's own tests exercised the `weight` field, so this shipped invisibly until the golden-fixture query (which mirrors what a real client actually asks for) hit it. Fixed by wrapping explicitly: `weight=Weight(kg=data["weight"])` (`from measurement.measures import Weight`) in `saleor/graphql/order/resolvers.py`. `_create_order`'s in-memory `Order(**order_data, ...)` in `complete_checkout.py` was never at risk — its `weight` comes from `checkout.get_total_weight()`, already a real `Weight` object, not a raw float from JSON.
+
+This is the last gate before the delivery is considered functionally complete (Terraform in step 9 is infrastructure-only and doesn't gate this).
 
 ## Next step
 
