@@ -25,9 +25,11 @@ from ..discount.utils import (
     increase_voucher_usage,
     remove_voucher_usage_by_customer,
 )
+from ..order import order_service_client
 from ..order.actions import order_created
 from ..order.emails import send_order_confirmation, send_staff_order_confirmation
 from ..order.models import Order, OrderLine
+from ..order.order_service_client import OrderServiceUnavailable
 from ..payment import PaymentError, gateway
 from ..payment.models import Payment, Transaction
 from ..payment.utils import store_customer_id
@@ -226,6 +228,46 @@ def _prepare_order_data(
     return order_data
 
 
+def _order_data_to_payload(order_data: dict, checkout_token: str) -> dict:
+    """Flatten `order_data`'s live Django FK references / Money objects into
+    the plain-scalar payload order-service's `POST /orders/` expects.
+    """
+    payload = {
+        "checkout_token": checkout_token,
+        "language_code": order_data.get("language_code", ""),
+        "tracking_client_id": order_data.get("tracking_client_id", ""),
+        "user_email": order_data.get("user_email", ""),
+        "customer_note": order_data.get("customer_note", ""),
+        "discount_name": order_data.get("discount_name"),
+        "translated_discount_name": order_data.get("translated_discount_name"),
+        "shipping_method_name": order_data.get("shipping_method_name"),
+    }
+    if order_data.get("user"):
+        payload["user_id"] = order_data["user"].pk
+    if order_data.get("billing_address"):
+        payload["billing_address_id"] = order_data["billing_address"].pk
+    if order_data.get("shipping_address"):
+        payload["shipping_address_id"] = order_data["shipping_address"].pk
+    if order_data.get("shipping_method"):
+        payload["shipping_method_id"] = order_data["shipping_method"].pk
+    if order_data.get("voucher"):
+        payload["voucher_id"] = order_data["voucher"].pk
+
+    total = order_data["total"]
+    payload["total_net_amount"] = str(total.net.amount)
+    payload["total_gross_amount"] = str(total.gross.amount)
+    payload["currency"] = total.currency
+
+    if "shipping_price" in order_data:
+        shipping_price = order_data["shipping_price"]
+        payload["shipping_price_net_amount"] = str(shipping_price.net.amount)
+        payload["shipping_price_gross_amount"] = str(shipping_price.gross.amount)
+    if "discount" in order_data:
+        payload["discount_amount"] = str(order_data["discount"].amount)
+
+    return payload
+
+
 @transaction.atomic
 def _create_order(*, checkout: Checkout, order_data: dict, user: User) -> Order:
     """Create an order from the checkout.
@@ -248,7 +290,32 @@ def _create_order(*, checkout: Checkout, order_data: dict, user: User) -> Order:
     total_price_left = order_data.pop("total_price_left")
     order_lines = order_data.pop("lines")
 
-    order = Order.objects.create(**order_data, checkout_token=checkout.token)
+    payload = _order_data_to_payload(order_data, checkout.token)
+    try:
+        response = order_service_client.create_order(payload)
+    except OrderServiceUnavailable as exc:
+        raise ValidationError(
+            {
+                "checkout": ValidationError(
+                    "Order service unavailable, please retry.",
+                    code=CheckoutErrorCode.GRAPHQL_ERROR,
+                )
+            }
+        ) from exc
+
+    # Build the in-memory Order from the ORIGINAL order_data (still holds live
+    # Django object references for FKs) so nested field resolution keeps
+    # working unchanged; only pk/token/status/totals come from order-service,
+    # the sole source of truth for those.
+    order = Order(**order_data, checkout_token=checkout.token)
+    order.id = response["id"]
+    order.pk = response["id"]
+    order.token = response["token"]
+    order.status = response["status"]
+    order.total_net_amount = Decimal(response["total_net_amount"])
+    order.total_gross_amount = Decimal(response["total_gross_amount"])
+    order._state.adding = False
+
     for line in order_lines:
         line.order_id = order.pk
     order_lines = OrderLine.objects.bulk_create(order_lines)

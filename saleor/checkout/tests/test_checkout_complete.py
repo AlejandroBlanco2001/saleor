@@ -1,16 +1,82 @@
+from unittest import mock
+
 import pytest
 from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import ValidationError
 
 from ...account import CustomerEvents
 from ...account.models import CustomerEvent
 from ...core.exceptions import InsufficientStock
 from ...core.taxes import zero_money, zero_taxed_money
 from ...order import OrderEvents, OrderEventsEmails
-from ...order.models import OrderEvent
+from ...order.models import Order, OrderEvent
+from ...order.order_service_client import OrderServiceUnavailable
 from ...tests.utils import flush_post_commit_hooks
 from .. import calculations
 from ..complete_checkout import _create_order, _prepare_order_data
 from ..utils import add_variant_to_checkout
+
+
+def test_create_order_fields_match_order_service_response(
+    checkout_with_item, customer_user, shipping_method, payment_txn_captured,
+):
+    """Regression test for the `_create_order` correctness risk: the final
+    `order.save()` writes every field, not just metadata, so it must not
+    clobber what order-service's stand-in already persisted.
+    """
+    checkout = checkout_with_item
+    checkout.user = customer_user
+    checkout.billing_address = customer_user.default_billing_address
+    checkout.shipping_address = customer_user.default_shipping_address
+    checkout.shipping_method = shipping_method
+    checkout.payments.add(payment_txn_captured)
+    checkout.tracking_code = "tracking_code"
+    checkout.note = "a note"
+    checkout.save()
+
+    order_data = _prepare_order_data(
+        checkout=checkout, lines=list(checkout), discounts=None,
+    )
+    order = _create_order(checkout=checkout, order_data=order_data, user=customer_user)
+
+    # Re-fetch independently of the in-memory instance `_create_order`
+    # returns, so this only passes if what's actually in the DB is correct.
+    persisted = Order.objects.get(pk=order.pk)
+    assert persisted.checkout_token == str(checkout.token)
+    assert persisted.language_code == order.language_code
+    assert persisted.tracking_client_id == "tracking_code"
+    assert persisted.customer_note == "a note"
+    assert persisted.billing_address_id == order.billing_address_id
+    assert persisted.shipping_address_id == order.shipping_address_id
+    assert persisted.shipping_method_id == shipping_method.id
+    assert persisted.total_net_amount == order.total_net_amount
+    assert persisted.total_gross_amount == order.total_gross_amount
+    assert persisted.status == order.status
+    assert persisted.token == order.token
+
+
+def test_create_order_service_unavailable_raises_validation_error(
+    checkout_with_item, customer_user, shipping_method, payment_txn_captured,
+):
+    checkout = checkout_with_item
+    checkout.user = customer_user
+    checkout.billing_address = customer_user.default_billing_address
+    checkout.shipping_address = customer_user.default_shipping_address
+    checkout.shipping_method = shipping_method
+    checkout.payments.add(payment_txn_captured)
+    checkout.save()
+
+    order_data = _prepare_order_data(
+        checkout=checkout, lines=list(checkout), discounts=None,
+    )
+    with mock.patch(
+        "saleor.checkout.complete_checkout.order_service_client.create_order",
+        side_effect=OrderServiceUnavailable("boom"),
+    ):
+        with pytest.raises(ValidationError):
+            _create_order(checkout=checkout, order_data=order_data, user=customer_user)
+
+    assert not Order.objects.filter(checkout_token=checkout.token).exists()
 
 
 def test_create_order_captured_payment_creates_expected_events(

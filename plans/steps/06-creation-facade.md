@@ -1,4 +1,4 @@
-# Step 6 — Creation seam Strangler Facade (highest risk — do last)
+# Step 6 — Creation seam Strangler Facade (highest risk — do last) [DONE]
 
 Depends on: Steps 4 and 5 done and verified. This is the riskiest edit — only start once the HTTP client and query facade are solid.
 See `plans/00-master-plan.md` for full context.

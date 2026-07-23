@@ -2498,6 +2498,106 @@ def user_export_event(user_export_file):
     )
 
 
+def _order_to_service_dict(order: Order) -> dict:
+    """Mirror order-service's `OrderResponse` shape from a real `Order` row.
+
+    Used by the test stand-ins below in place of an actual order-service
+    HTTP call -- order-service isn't running in the test suite, but the
+    Strangler Facade seams (checkout completion, order query resolvers)
+    still need a same-shaped dict back.
+    """
+    return {
+        "id": order.id,
+        "token": str(order.token),
+        "checkout_token": order.checkout_token,
+        "status": order.status,
+        "currency": order.currency,
+        "created": order.created.isoformat(),
+        "total_net_amount": str(order.total_net_amount),
+        "total_gross_amount": str(order.total_gross_amount),
+        "user_id": order.user_id,
+        "billing_address_id": order.billing_address_id,
+        "shipping_address_id": order.shipping_address_id,
+        "shipping_method_id": order.shipping_method_id,
+        "shipping_method_name": order.shipping_method_name,
+        "shipping_price_net_amount": str(order.shipping_price_net_amount),
+        "shipping_price_gross_amount": str(order.shipping_price_gross_amount),
+        "voucher_id": order.voucher_id,
+        "discount_amount": str(order.discount_amount),
+        "discount_name": order.discount_name,
+        "translated_discount_name": order.translated_discount_name,
+        "display_gross_prices": order.display_gross_prices,
+        "customer_note": order.customer_note,
+        "weight": float(order.weight.value) if order.weight else 0.0,
+        "language_code": order.language_code,
+        "tracking_client_id": order.tracking_client_id,
+    }
+
+
+@pytest.fixture(autouse=True)
+def order_service_client_stub(monkeypatch):
+    """Order-service isn't running in the test suite. Stand in for it at the
+    HTTP-client boundary (`saleor/order/order_service_client.py`) with real
+    reads/writes against the same `order_order` table order-service would
+    use, so the Strangler Facade seams (checkout completion in
+    `complete_checkout.py`, the order query resolvers) keep behaving exactly
+    like the pre-extraction code for every test that doesn't explicitly
+    mock `order_service_client` itself. An id-only fake response would not
+    do -- `OrderLine.bulk_create`'s FK to `order_order` needs a real row.
+    """
+
+    def _fake_create_order(payload):
+        order = Order.objects.create(
+            checkout_token=payload["checkout_token"],
+            language_code=payload.get("language_code", ""),
+            tracking_client_id=payload.get("tracking_client_id", ""),
+            user_email=payload.get("user_email", ""),
+            customer_note=payload.get("customer_note", ""),
+            discount_name=payload.get("discount_name"),
+            translated_discount_name=payload.get("translated_discount_name"),
+            shipping_method_name=payload.get("shipping_method_name"),
+            user_id=payload.get("user_id"),
+            billing_address_id=payload.get("billing_address_id"),
+            shipping_address_id=payload.get("shipping_address_id"),
+            shipping_method_id=payload.get("shipping_method_id"),
+            voucher_id=payload.get("voucher_id"),
+            currency=payload["currency"],
+            total_net_amount=Decimal(payload["total_net_amount"]),
+            total_gross_amount=Decimal(payload["total_gross_amount"]),
+            shipping_price_net_amount=Decimal(
+                payload.get("shipping_price_net_amount") or 0
+            ),
+            shipping_price_gross_amount=Decimal(
+                payload.get("shipping_price_gross_amount") or 0
+            ),
+            discount_amount=Decimal(payload.get("discount_amount") or 0),
+        )
+        return _order_to_service_dict(order)
+
+    def _fake_get_order(order_id):
+        order = Order.objects.filter(pk=order_id).first()
+        return _order_to_service_dict(order) if order else None
+
+    def _fake_get_order_by_token(token):
+        order = (
+            Order.objects.exclude(status=OrderStatus.DRAFT)
+            .filter(token=token)
+            .first()
+        )
+        return _order_to_service_dict(order) if order else None
+
+    monkeypatch.setattr(
+        "saleor.order.order_service_client.create_order", _fake_create_order
+    )
+    monkeypatch.setattr(
+        "saleor.order.order_service_client.get_order", _fake_get_order
+    )
+    monkeypatch.setattr(
+        "saleor.order.order_service_client.get_order_by_token",
+        _fake_get_order_by_token,
+    )
+
+
 @pytest.fixture
 def app_export_event(app_export_file):
     return ExportEvent.objects.create(
