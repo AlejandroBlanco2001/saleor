@@ -28,7 +28,7 @@ Cover:
 
 ## `test_golden_fixture_parity.py`
 
-For each golden fixture: run the same GraphQL query against the **facade-enabled** app (real order-service running per step 7, or mocked per steps 5/6 if run outside the composed stack) and assert:
+For each golden fixture: run the same GraphQL query against the **facade-enabled** app (real order-service running per step 7's `local` Compose profile, or mocked per steps 5/6 if run outside the composed stack — step 9's cloud order-service is an optional extra run, not required for this gate) and assert:
 - **Schema parity**: same set of fields present/absent (no field silently disappeared or appeared).
 - **Functional parity**: same values for every field (ids obviously differ per test run — compare by re-running the full flow, not literal id equality, or normalize ids before diffing).
 - **Business-rule parity**: anything that was previously rejected (e.g. a lookup for a nonexistent order) is still rejected the same way (`null`, not an error).

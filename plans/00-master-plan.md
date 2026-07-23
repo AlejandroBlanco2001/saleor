@@ -19,8 +19,20 @@ This delivery implements that first increment as real, running code. Confirmed s
 - **State pattern**: `OrderStatus` enum + `_VALID_TRANSITIONS` + `transition_order_status()` inside order-service — pure domain logic, unit tested, no public endpoint yet.
 - **Publish-Subscribe**: order-service POSTs `{event_type, order_id}` to new Django endpoint `POST /order-service/events/`; that endpoint calls `saleor.order.actions.order_created(order, user)` — reuses existing `OrderEvent` audit-log + `PluginsManager` → `WebhookPlugin` → Celery chain unchanged.
 - **Resilience**: Django→order-service HTTP client, short timeout + one bounded retry (`requests` + `urllib3.Retry`, already a dependency). Failures → controlled GraphQL error, never a hang.
-- **docker-compose.yml** (new): `db`, `redis`, `web`, `celeryworker`, `order-service`.
-- **Terraform** (separate, AWS Learner Lab): two EC2 instances (monolith box, order-service box) + RDS, `LabInstanceProfile`, no Fargate/ECR/ALB/custom IAM.
+- **docker-compose.yml** (new): `db`, `redis`, `web`, `celeryworker`, `order-service`, gated behind Compose **profiles** (`local`, `monolith`, `order-service`) so it can run three ways: everything local, monolith-only (`web`+`celeryworker`) pointed at AWS, or order-service-only pointed at AWS. See "Revised target deployment" below.
+- **Terraform** (separate, AWS Learner Lab): RDS + SQS + **one** EC2 instance (order-service only) + security groups, `LabInstanceProfile`, no Fargate/ECR/ALB/custom IAM.
+
+## Revised target deployment (decided after step 6, before step 7)
+
+Original design (Terraform provisioning two EC2 boxes, one per service, both talking over a private VPC) is replaced. Actual target: **the monolith (`web` + `celeryworker`) runs on the developer's machine** (natively or via the `monolith` Compose profile), pointed at cloud-hosted dependencies over the public internet. Only `order-service` gets deployed to AWS.
+
+- **Database**: AWS RDS Postgres. Since the monolith runs outside the VPC (developer's laptop, not EC2), RDS must be reachable from the public internet — `publicly_accessible = true`, but its security group only opens 5432 to `var.my_ip` (developer IP) and the `order_service_sg` (same-VPC EC2 instance), never `0.0.0.0/0`.
+- **Queue**: AWS SQS (`kombu`'s `sqs://` transport — `boto3` is already a pinned dependency, no new package needed). Celery's broker becomes an SQS queue URL instead of Redis; no server to run/manage. The `local` Compose profile still uses a plain `redis` container for pure-local runs — no reason to require AWS for a fully-local dev loop.
+- **order-service**: still deployed to a single EC2 instance (Learner Lab IAM constraints — see step 9 — rule out Fargate/ECS regardless of this change; EC2 stays the simplest path). Its security group opens 8000 to `var.my_ip` too (the monolith calling it is no longer in-VPC, so `security_groups = [monolith_sg.id]` no longer applies — there is no `monolith_sg` anymore).
+- **Local dev**, three explicit modes via `docker-compose.yml` profiles:
+  1. `local` — full stack, nothing touches AWS (`db`, `redis`, `web`, `celeryworker`, `order-service` all containers). This is what steps 1-6's tests already exercise.
+  2. `monolith` — only `web`+`celeryworker` run (locally, in Docker or natively), `.env` points `DATABASE_URL` at RDS, `CELERY_BROKER_URL` at SQS, `ORDER_SERVICE_URL` at the EC2 instance's address.
+  3. `order-service` — only the `order-service` container runs, `.env` points `ASYNC_DATABASE_URL` at RDS, `DJANGO_EVENTS_URL` at wherever the monolith is currently reachable (developer's own public IP/tunnel, since it's not a fixed cloud address in this mode — call this out as a real limitation in step 7, not solved silently).
 
 ## Step index
 
@@ -30,9 +42,9 @@ This delivery implements that first increment as real, running code. Confirmed s
 4. `plans/steps/04-django-http-client.md` — Django→order-service HTTP client, timeout+retry.
 5. `plans/steps/05-query-facade.md` — Strangler Facade for `resolve_order`/`resolve_order_by_token`.
 6. `plans/steps/06-creation-facade.md` — Strangler Facade for `_create_order()`.
-7. `plans/steps/07-docker-compose.md` — `docker-compose.yml` + `order_service/Dockerfile`.
+7. `plans/steps/07-docker-compose.md` — `docker-compose.yml` (profile-gated: local / monolith-only / order-service-only) + `order_service/Dockerfile`.
 8. `plans/steps/08-golden-fixture-tests.md` — parity tests, legacy vs. facade.
-9. `plans/steps/09-terraform-aws.md` — Terraform plan for AWS Academy Learner Lab (EC2 x2 + RDS).
+9. `plans/steps/09-terraform-aws.md` — Terraform plan for AWS Academy Learner Lab (RDS + SQS + order-service EC2 only).
 
 Do them in order — each depends on the previous being done and tested. Steps 1-4 have no dependency on Django facade code and can be built/tested in isolation first; steps 5-6 are the risky Django edits and should only start once 1-4 are verified working.
 
@@ -52,7 +64,7 @@ Do them in order — each depends on the previous being done and tested. Steps 1
 
 1. `order_service/` unit + API tests pass standalone (`pytest order_service/tests/`).
 2. Django facade tests pass with the client mocked (`pytest saleor/checkout/tests/test_checkout_complete.py saleor/graphql/order/tests/test_order_service_facade.py`).
-3. `docker-compose up` brings up all 5 services; `docker-compose exec web python manage.py migrate` succeeds; a manual GraphQL `order(id:...)` query and a full checkout-completion flow both work end-to-end against the composed stack, hitting the real `order-service` container.
+3. `docker-compose --profile local up` brings up all 5 services; `docker-compose exec web python manage.py migrate` succeeds; a manual GraphQL `order(id:...)` query and a full checkout-completion flow both work end-to-end against the composed stack, hitting the real `order-service` container.
 4. Kill/pause the `order-service` container mid-test and confirm the monolith returns a controlled GraphQL/checkout error within the configured timeout, not a hang.
 5. Golden-fixture diff shows 100% parity on the happy-path queries.
-6. (Optional, explicit trigger only) `terraform plan` in `infra/terraform/` runs clean against a real Learner Lab session before ever running `apply`.
+6. (Optional, explicit trigger only) `terraform plan` in `infra/terraform/` runs clean against a real Learner Lab session before ever running `apply`. Then (also explicit trigger only) `terraform apply`, run the `monolith` Compose profile locally against the resulting RDS/SQS/order-service outputs, and confirm the same checkout-completion + query flow works end-to-end over the public internet.
