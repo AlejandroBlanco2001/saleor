@@ -45,4 +45,15 @@ class OrderResponse(BaseModel):
     billing_address_id: int | None
     shipping_address_id: int | None
     shipping_method_id: int | None
+    shipping_method_name: str | None
+    shipping_price_net_amount: Decimal
+    shipping_price_gross_amount: Decimal
     voucher_id: int | None
+    discount_amount: Decimal
+    discount_name: str | None
+    translated_discount_name: str | None
+    display_gross_prices: bool
+    customer_note: str
+    weight: float
+    language_code: str
+    tracking_client_id: str

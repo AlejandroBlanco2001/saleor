@@ -1,4 +1,4 @@
-# Step 5 — Query seam Strangler Facade
+# Step 5 — Query seam Strangler Facade [DONE]
 
 Depends on: Step 4 (`plans/steps/04-django-http-client.md`) done and verified. Do this before step 6 (lower risk, read-only).
 See `plans/00-master-plan.md` for full context.

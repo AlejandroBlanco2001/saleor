@@ -1,12 +1,17 @@
+from decimal import Decimal
+
 import graphene
+from django.utils.dateparse import parse_datetime
+from graphql import GraphQLError
 
 from ...order import OrderStatus, models
+from ...order import order_service_client
 from ...order.events import OrderEvents
 from ...order.models import OrderEvent
+from ...order.order_service_client import OrderServiceUnavailable
 from ...order.utils import sum_order_totals
 from ..utils.filters import filter_by_period
 from .enums import OrderStatusFilter
-from .types import Order
 
 ORDER_SEARCH_FIELDS = ("id", "discount_name", "token", "user_email", "user__email")
 
@@ -44,8 +49,54 @@ def resolve_orders_total(_info, period):
     return sum_order_totals(qs)
 
 
+def _hydrate_order(data: dict) -> models.Order:
+    """Build a Django `Order` instance from order-service's response without
+    querying the DB for it. Every field the `Order` GraphQL type's
+    `Meta.only_fields` needs directly (see saleor/graphql/order/types.py)
+    must be set here; nested fields (lines, fulfillments, events, addresses)
+    are reverse-FK/FK managers that lazily query keyed off `pk`/`*_id`, so
+    they keep working unchanged once `pk` is set.
+    """
+    order = models.Order(
+        id=data["id"],
+        token=data["token"],
+        checkout_token=data["checkout_token"],
+        status=data["status"],
+        currency=data["currency"],
+        created=parse_datetime(data["created"]),
+        total_net_amount=Decimal(data["total_net_amount"]),
+        total_gross_amount=Decimal(data["total_gross_amount"]),
+        shipping_price_net_amount=Decimal(data["shipping_price_net_amount"]),
+        shipping_price_gross_amount=Decimal(data["shipping_price_gross_amount"]),
+        shipping_method_name=data["shipping_method_name"],
+        discount_amount=Decimal(data["discount_amount"]),
+        discount_name=data["discount_name"],
+        translated_discount_name=data["translated_discount_name"],
+        display_gross_prices=data["display_gross_prices"],
+        customer_note=data["customer_note"],
+        weight=data["weight"],
+        language_code=data["language_code"],
+        tracking_client_id=data["tracking_client_id"],
+    )
+    order.user_id = data.get("user_id")
+    order.billing_address_id = data.get("billing_address_id")
+    order.shipping_address_id = data.get("shipping_address_id")
+    order.shipping_method_id = data.get("shipping_method_id")
+    order.voucher_id = data.get("voucher_id")
+    order.pk = data["id"]
+    order._state.adding = False
+    return order
+
+
 def resolve_order(info, order_id):
-    return graphene.Node.get_node_from_global_id(info, order_id, Order)
+    _type, pk = graphene.Node.from_global_id(order_id)
+    if _type != "Order":
+        return None
+    try:
+        data = order_service_client.get_order(pk)
+    except OrderServiceUnavailable as exc:
+        raise GraphQLError("Order service unavailable") from exc
+    return _hydrate_order(data) if data else None
 
 
 def resolve_homepage_events():
@@ -59,8 +110,8 @@ def resolve_homepage_events():
 
 
 def resolve_order_by_token(token):
-    return (
-        models.Order.objects.exclude(status=OrderStatus.DRAFT)
-        .filter(token=token)
-        .first()
-    )
+    try:
+        data = order_service_client.get_order_by_token(token)
+    except OrderServiceUnavailable as exc:
+        raise GraphQLError("Order service unavailable") from exc
+    return _hydrate_order(data) if data else None
