@@ -47,3 +47,4 @@ infra/terraform/terraform.tfvars
 infra/terraform/terraform.tfstate*
 infra/terraform/*.tfplan
 infra/terraform/*.pem
+evidencias/README.md
