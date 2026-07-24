@@ -14,13 +14,9 @@ apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
 # --- App code ---
-# Manual prerequisite (documented in README, not baked in here): the repo
-# must be reachable without embedding credentials in user_data. Either a
-# public git remote, or the AMI/instance already has the code (e.g. via a
-# pre-baked snapshot) -- adjust this clone line for your actual setup.
 mkdir -p /opt/saleor
 cd /opt/saleor
-git clone <YOUR_REPO_URL> . || echo "Manual step required: copy the repo to /opt/saleor (git clone or scp/aws s3 cp)."
+git clone --branch entrega_final --depth 1 https://github.com/AlejandroBlanco2001/saleor.git . || echo "Manual step required: copy the repo to /opt/saleor (git clone or scp/aws s3 cp)."
 
 # --- .env.cloud for the order-service Compose profile ---
 cat > /opt/saleor/.env.cloud <<EOF

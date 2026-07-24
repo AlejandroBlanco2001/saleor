@@ -1,6 +1,6 @@
 resource "aws_security_group" "order_service" {
   name        = "${var.project_name}-order-service-sg"
-  description = "order-service EC2: SSH + app port from the developer's IP only"
+  description = "order-service EC2: SSH + app port from the developer IP only"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -12,9 +12,9 @@ resource "aws_security_group" "order_service" {
   }
 
   ingress {
-    description = "order-service HTTP API from developer IP (local monolith calls in from here)"
-    from_port   = 8000
-    to_port     = 8000
+    description = "order-service HTTP API from developer IP (local monolith calls in from here) -- host port 8001, per docker-compose order-service port mapping 8001:8000"
+    from_port   = 8001
+    to_port     = 8001
     protocol    = "tcp"
     cidr_blocks = [var.my_ip_cidr]
   }
@@ -33,7 +33,7 @@ resource "aws_security_group" "order_service" {
 
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds-sg"
-  description = "RDS: Postgres from the developer's IP (local monolith) and order-service's SG"
+  description = "RDS: Postgres from the developer IP (local monolith) and order-service SG"
   vpc_id      = var.vpc_id
 
   # Deliberate lab-only loosening: the monolith runs on a developer's

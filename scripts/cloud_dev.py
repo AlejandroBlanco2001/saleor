@@ -153,6 +153,11 @@ def cmd_wire(_args: argparse.Namespace) -> None:
         f"SECRET_KEY={secret_key}",
         "DEBUG=False",
         "ALLOWED_HOSTS=localhost,127.0.0.1",
+        "ALLOWED_CLIENT_HOSTS=localhost,127.0.0.1",
+        # No real storefront domain for this lab run -- account-confirmation
+        # emails would otherwise require ALLOWED_CLIENT_HOSTS to diverge from
+        # the localhost default (see settings.py's ENABLE_ACCOUNT_CONFIRMATION_BY_EMAIL check).
+        "ENABLE_ACCOUNT_CONFIRMATION_BY_EMAIL=False",
         "",
         f"DATABASE_URL=postgres://{db_username}:{db_password}@{rds_endpoint}/saleor",
         "CELERY_BROKER_URL=sqs://",
@@ -160,7 +165,7 @@ def cmd_wire(_args: argparse.Namespace) -> None:
         f"AWS_SECRET_ACCESS_KEY={os.environ['AWS_SECRET_ACCESS_KEY']}",
         f"AWS_SESSION_TOKEN={os.environ['AWS_SESSION_TOKEN']}",
         "AWS_DEFAULT_REGION=us-east-1",
-        f"ORDER_SERVICE_URL=http://{order_service_ip}:8000",
+        f"ORDER_SERVICE_URL=http://{order_service_ip}:8001",
         f"ORDER_SERVICE_SHARED_SECRET={shared_secret}",
         "",
         f"# SQS queue URL (reference, not consumed directly by Django): {sqs_queue_url}",

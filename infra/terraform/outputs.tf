@@ -40,7 +40,7 @@ output "env_cloud_snippet_for_local_monolith" {
     DATABASE_URL=postgres://${var.db_username}:${var.db_password}@${module.rds.endpoint}/saleor
     CELERY_BROKER_URL=sqs://
     AWS_DEFAULT_REGION=${var.aws_region}
-    ORDER_SERVICE_URL=http://${module.order_service.public_ip}:8000
+    ORDER_SERVICE_URL=http://${module.order_service.public_ip}:8001
     ORDER_SERVICE_SHARED_SECRET=${var.order_service_shared_secret}
   EOT
   sensitive   = true
